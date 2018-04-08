@@ -1,5 +1,5 @@
 
-)ckage adpater
+package adapter
 
 import (
 	"fmt"
@@ -8,11 +8,17 @@ import (
 	"github.com/streadway/amqp"
 )
 
-var connect *amqp.connectection
+var connect *amqp.Connection
+
+func failOnError(err error, msg string) {
+	if err != nil {
+		log.Fatalf("%s: %s", msg, err)
+	}
+}
 
 func Init(c string) {
 	var err error
-	// Initialize the package level "connect" variable that represents the connectection the the rabbitmq server
+	// Initialize connection to the rabbitmq server
 	connect, err = amqp.Dial(c)
 	if err != nil {
 		log.Fatalf("could not connect to rabbitmq: %v", err)
@@ -47,7 +53,7 @@ func Publish(q string, msg []byte) error {
 	}
 
 	// publish the message to the queue specified in the arguments
-	if err := ch.Publish('logs', q, false, false, payload); err != nil {
+	if err := ch.Publish("logs", q, false, false, payload); err != nil {
 		return fmt.Errorf("[Publisher] failed to publish to queue %v", err)
 	}
 
@@ -90,7 +96,6 @@ func Subscribe(qName string) (<-chan amqp.Delivery, func(), error) {
             nil)
     failOnError(err, "Failed to bind a queue")
 
-    forever := make(chan bool)
 	// assert that the queue exists (creates a queue if it doesn't)
 
 	// create a channel in go, through which incoming messages will be received
