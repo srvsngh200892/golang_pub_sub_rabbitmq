@@ -1,68 +1,100 @@
-package main
+
+)ckage adpater
 
 import (
 	"fmt"
 	"log"
-	"os"
-	"strconv"
-	"strings"
-	"time"
 
-	"github.com/srvnsngh200892/golang_pub_sub_rabbitmq/adapater"
+	"github.com/streadway/amqp"
 )
 
-func main() {
+var connect *amqp.connectection
 
-	adapater.Init("amqp://localhost")
-	// start a publisher or subscriber based on argument
-	if os.Args[1] == "subscriber_start" {
-		subscriber()
-	}
-	else if os.Args[1] == "publisher_start" {
-		publisher()
-	}
-	else {
-		panic('undefined method call')
-	}
-}
-
-func publisher() {
-	//  publishes the message "hello,world" every 900 ms
-	for {
-		if err := adapater.Publish("queue1", []byte("hello,world")); err != nil {
-			panic(err)
-		}
-		time.Sleep(900 * time.Millisecond)
-	}
-}
-
-func subscriber() {
-
-	// open channel
-	data, close, err := adapater.Subscribe("queue1")
+func Init(c string) {
+	var err error
+	// Initialize the package level "connect" variable that represents the connectection the the rabbitmq server
+	connect, err = amqp.Dial(c)
 	if err != nil {
+		log.Fatalf("could not connect to rabbitmq: %v", err)
 		panic(err)
 	}
-	defer close()
-	forever := make(chan bool)
-
-	go func() {
-		// get the message
-		for d := range data {
-			
-			string1, string2 := toString(d.Body)
-			fmt.Println(time.Now().Format("01-02-2006 18:00:00"), "::", string1+string1)
-			// acknowledge the message 
-			d.Ack(false)
-		}
-	}()
-
-	log.Printf(" [-**-] Waiting for messages. To exit press CTRL+C")
-	<-forever
 }
 
-func toString(b []byte) (int, int) {
-	s := string(b)
-	data := strings.Split(s, ",")
-	data[0], data[1]
+func Publish(q string, msg []byte) error {
+	// create a channel through which we publish
+	ch, err := connect.Channel()
+	if err != nil {
+		return err
+	}
+	defer ch.Close()
+
+	err = ch.ExchangeDeclare(
+	            "logs",   // name
+	            "fanout", // type
+	            true,     // durable
+	            false,    // auto-deleted
+	            false,    // internal
+	            false,    // no-wait
+	            nil,      // arguments
+	    )
+	    failOnError(err, "Failed to declare an exchange")
+
+	// create the payload with the message that we specify in the arguments
+	payload := amqp.Publishing{
+		DeliveryMode: amqp.Persistent,
+		ContentType:  "application/json",
+		Body:         msg,
+	}
+
+	// publish the message to the queue specified in the arguments
+	if err := ch.Publish('logs', q, false, false, payload); err != nil {
+		return fmt.Errorf("[Publisher] failed to publish to queue %v", err)
+	}
+
+	return nil
+}
+
+func Subscribe(qName string) (<-chan amqp.Delivery, func(), error) {
+	// create a channel through which we publish
+	ch, err := connect.Channel()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	err = ch.ExchangeDeclare(
+                "logs",   // name
+                "fanout", // type
+                true,     // durable
+                false,    // auto-deleted
+                false,    // internal
+                false,    // no-wait
+                nil,      // arguments
+        )
+    failOnError(err, "Failed to declare an exchange")
+
+    q, err := ch.QueueDeclare(
+            qName,    // name
+            false, // durable
+            false, // delete when usused
+            true,  // exclusive
+            false, // no-wait
+            nil,   // arguments
+    )
+    failOnError(err, "Failed to declare a queue")
+
+    err = ch.QueueBind(
+            q.Name, // queue name
+            "",     // routing key
+            "logs", // exchange
+            false,
+            nil)
+    failOnError(err, "Failed to bind a queue")
+
+    forever := make(chan bool)
+	// assert that the queue exists (creates a queue if it doesn't)
+
+	// create a channel in go, through which incoming messages will be received
+	c, err := ch.Consume(q.Name, "", false, false, false, false, nil)
+	// return the created channel
+	return c, func() { ch.Close() }, err
 }
